@@ -1,33 +1,35 @@
 """
-Wake word detection for the Minty Box.
+Wake word detection and utterance capture for the Minty Box.
 
 Listens to the ReSpeaker Lite microphone continuously using openWakeWord
-for on-device wake word detection. Runs entirely offline — no network
-calls during inference. When a wake word is detected with sufficient
-confidence, triggers a user-supplied callback.
+for on-device wake word detection. Runs entirely offline. When a wake word
+is detected, the listener switches into capture mode — accumulating audio
+frames from the same stream, monitoring RMS energy for silence, then
+emitting the full utterance buffer. Never opens a second ALSA stream.
 
 Architecture:
     ReSpeaker Lite mic array
         → XMOS DSP (hardware AEC, noise suppression, beamforming)
         → USB audio (16kHz, 16-bit, mono)
-        → sounddevice InputStream
-        → openWakeWord ONNX model (80ms frames)
+        → sounddevice InputStream (single stream, shared)
+        → openWakeWord ONNX model (80ms frames, listening mode)
         → VAD gating (Silero)
         → threshold + cooldown filtering
         → on_wake callback
+        → capture mode (same stream, RMS silence detection)
+        → on_utterance callback (raw audio buffer)
 
-Usage (library):
+Usage:
     from minty_box.wake import WakeWordListener
 
     def on_wake(wake_word: str, score: float) -> None:
-        print(f"Wake word '{wake_word}' detected: {score:.3f}")
+        print(f"Wake word: {wake_word}")
 
-    listener = WakeWordListener(on_wake=on_wake)
-    listener.start()   # blocks until interrupted or stop() called
+    def on_utterance(audio: np.ndarray) -> None:
+        # Send audio to STT, e.g. stt.transcribe_buffer(audio)
 
-Usage (CLI):
-    python -m minty_box.wake --model models/araminta.onnx
-    python -m minty_box.wake --threshold 0.7 --debug
+    listener = WakeWordListener(on_wake=on_wake, on_utterance=on_utterance)
+    listener.start()   # blocks until interrupted
 """
 
 from __future__ import annotations
@@ -36,6 +38,7 @@ import argparse
 import logging
 import signal
 import time
+from collections import deque
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -50,11 +53,9 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 # Substring used to identify the ReSpeaker Lite in sounddevice queries.
-# Matches: "ReSpeaker Lite: USB Audio (hw:CARD=Lite,DEV=0)"
 _RESPEAKER_NAME: str = "ReSpeaker Lite"
 
 # Audio format required by openWakeWord's ONNX models.
-# 16 kHz sample rate, mono, 16-bit signed integer PCM.
 _SAMPLE_RATE: int = 16000
 _CHANNELS: int = 1
 _BLOCK_SIZE: int = 1280  # 80 ms at 16 kHz — openWakeWord's native frame size
@@ -74,61 +75,72 @@ _DEFAULT_THRESHOLD: float = 0.5
 _COOLDOWN_SECONDS: float = 2.0
 _VAD_THRESHOLD: float = 0.5  # Silero VAD probability threshold
 
+# Utterance capture defaults.
+_CAPTURE_SILENCE_DURATION: float = 1.5  # seconds of quiet before endpoint
+_CAPTURE_SILENCE_THRESHOLD: float = 0.01  # RMS amplitude below which is silence
+_CAPTURE_TIMEOUT: float = 15.0  # max capture duration
+_CAPTURE_MIN_SPEECH: float = 0.5  # minimum speech before allowing endpoint
+
 
 # ---------------------------------------------------------------------------
 # WakeWordListener
 # ---------------------------------------------------------------------------
 
 class WakeWordListener:
-    """Continuous wake word detector using openWakeWord and sounddevice.
+    """Continuous wake word detector with built-in utterance capture.
 
-    Opens an audio input stream from the ReSpeaker Lite (or a
-    user-specified device) and feeds 80 ms frames into one or more
-    openWakeWord ONNX models.  Predictions are gated by a configurable
-    score threshold and an optional Silero voice-activity detector.
-    Repeated detections of the same wake word within a cooldown window
-    are suppressed.  When a valid detection occurs, the user-supplied
-    ``on_wake`` callback is invoked.
+    Opens a single audio input stream from the ReSpeaker Lite.  In
+    *listening mode*, 80 ms frames are fed into openWakeWord ONNX
+    models.  When a wake word fires, the listener switches to *capture
+    mode* on the same stream — accumulating frames, monitoring RMS
+    energy, detecting silence, then emitting the utterance buffer via
+    ``on_utterance``.  After capture, it returns to listening mode.
+
+    This single-stream architecture avoids ALSA ``Device unavailable``
+    errors that occur when two capture streams compete for the same
+    hardware.
 
     Parameters
     ----------
     on_wake:
-        Callback invoked for each detection that passes threshold,
-        VAD, and cooldown filters.  Receives the model name and the
-        raw prediction score (0–1).
+        Callback invoked when a wake word is detected.  Receives the
+        model name and the raw prediction score (0–1).
+    on_utterance:
+        Callback invoked after capture completes, receiving the full
+        utterance audio buffer as a 1-D ``int16`` numpy array.  Called
+        from the sounddevice background thread — ensure thread-safety
+        if interacting with shared state.
     model_paths:
         Paths to custom ``.onnx`` models.  If ``None``, all built-in
-        models (``alexa``, ``hey_mycroft``, …) are loaded.
+        models are loaded.
     threshold:
-        Minimum score (0–1) required to consider a frame a detection.
-        Lower values increase sensitivity but may raise false positives.
+        Minimum score (0–1) required to trigger a detection.
     input_device:
-        sounddevice device identifier (integer index or name substring).
-        If ``None``, the method searches for a device whose name
-        contains ``"ReSpeaker Lite"``.
+        sounddevice device identifier.  Auto-detects ReSpeaker Lite
+        if ``None``.
     enable_vad:
-        When ``True`` (default), raw predictions are multiplied by the
-        Silero VAD probability for the same frame.  Frames where VAD
-        probability is below ``_VAD_THRESHOLD`` (0.5) are effectively
-        suppressed.  This significantly reduces false activations from
-        continuous background noise.
+        When ``True``, Silero VAD gates predictions (reduces false
+        activations from background noise).
     cooldown:
-        Minimum interval (seconds) between successive detections of the
-        *same* model.  Different models may fire independently.
+        Minimum interval (seconds) between detections of the same model.
+    capture_silence_duration:
+        Seconds of continuous silence before ending an utterance capture.
+    capture_silence_threshold:
+        RMS amplitude below which audio is considered silence.
+    capture_timeout:
+        Maximum capture duration in seconds.  If reached, the
+        accumulated audio is emitted regardless of silence.
 
     Raises
     ------
     RuntimeError
-        If openWakeWord model loading fails (e.g., corrupted ``.onnx``
-        file or incompatible ONNX Runtime version).
+        If openWakeWord model loading fails.
 
     Notes
     -----
-    - SpeexDSP noise suppression is not available on ARM64 (Raspberry
-      Pi).  The XMOS DSP on the ReSpeaker Lite provides hardware noise
-      suppression instead.
-    - The ONNX Runtime CUDA provider is not available on the Pi; the
-      warning printed during model load is harmless.
+    - SpeexDSP is x86-only; on ARM64 the XMOS DSP handles noise
+      suppression in hardware.
+    - The ONNX Runtime CUDA warning on Pi is harmless.
     """
 
     # ------------------------------------------------------------------
@@ -138,20 +150,41 @@ class WakeWordListener:
     def __init__(
         self,
         on_wake: Callable[[str, float], None],
+        on_utterance: Callable[[np.ndarray], None] | None = None,
         *,
         model_paths: list[str] | None = None,
         threshold: float = _DEFAULT_THRESHOLD,
         input_device: str | int | None = None,
         enable_vad: bool = True,
         cooldown: float = _COOLDOWN_SECONDS,
+        capture_silence_duration: float = _CAPTURE_SILENCE_DURATION,
+        capture_silence_threshold: float = _CAPTURE_SILENCE_THRESHOLD,
+        capture_timeout: float = _CAPTURE_TIMEOUT,
     ) -> None:
         """Initialise the listener.
 
         See the class docstring for parameter descriptions.
         """
         self._on_wake = on_wake
+        self._on_utterance = on_utterance
         self._threshold = threshold
         self._cooldown = cooldown
+
+        # Capture parameters.
+        self._capture_silence_duration: float = capture_silence_duration
+        self._capture_silence_threshold: float = capture_silence_threshold
+        self._capture_timeout: float = capture_timeout
+
+        # Derived capture constants (frame-based for determinism).
+        self._silence_window_frames: int = max(
+            1, int(capture_silence_duration / (_BLOCK_SIZE / _SAMPLE_RATE))
+        )
+        self._min_speech_frames: int = max(
+            1, int(_CAPTURE_MIN_SPEECH * _SAMPLE_RATE / _BLOCK_SIZE)
+        )
+        self._max_capture_frames: int = int(
+            capture_timeout * _SAMPLE_RATE / _BLOCK_SIZE
+        )
 
         # Resolve audio input device.
         self._device = input_device or self._find_respeaker()
@@ -181,8 +214,12 @@ class WakeWordListener:
         # Per-model cooldown timestamps.
         self._last_detection: dict[str, float] = {}
 
+        # Capture state.  Written from the audio callback thread.
+        self._capturing: bool = False
+        self._capture_frames: list[np.ndarray] = []
+        self._capture_rms: deque[float] = deque(maxlen=self._silence_window_frames)
+
         # Runtime state.
-        self._stream: Optional[sd.InputStream] = None
         self._running: bool = False
 
     # ------------------------------------------------------------------
@@ -210,10 +247,13 @@ class WakeWordListener:
         signal.signal(signal.SIGTERM, self._handle_signal)
 
         logger.info(
-            "Listening for wake words: %s (threshold=%.2f, device=%s)",
+            "Listening for wake words: %s (threshold=%.2f, device=%s, "
+            "capture_silence=%.1fs, capture_timeout=%.1fs)",
             self._model_names,
             self._threshold,
             self._device,
+            self._capture_silence_duration,
+            self._capture_timeout,
         )
 
         try:
@@ -256,18 +296,25 @@ class WakeWordListener:
     ) -> None:
         """Process one audio block from the input stream.
 
-        Called by sounddevice on its internal background thread for
-        every ``_BLOCK_SIZE`` samples (80 ms at 16 kHz).  The audio is
-        fed to openWakeWord and predictions are checked against the
-        configured threshold, VAD gate, and cooldown window.
+        Two modes, selected by ``self._capturing``:
+
+        *Listening mode* — feeds audio to openWakeWord and checks
+        predictions against threshold, VAD, and cooldown.  On a
+        detection, calls ``on_wake`` and enters capture mode.
+
+        *Capture mode* — accumulates audio frames, computes RMS
+        energy, and monitors for silence.  When endpoint conditions
+        are met (minimum speech recorded + silence window full of
+        quiet frames, or timeout reached), calls ``on_utterance``
+        and returns to listening mode.
 
         Parameters
         ----------
         indata:
             Audio samples of shape ``(frames, channels)`` with dtype
-            ``int16``.  For mono input this will be ``(1280, 1)``.
+            ``int16``.  For mono: ``(1280, 1)``.
         frames:
-            Number of sample frames in this block (always ``_BLOCK_SIZE``).
+            Number of sample frames in this block (``_BLOCK_SIZE``).
         timestamp:
             CData structure with ADC/DAC time and current stream time.
         status:
@@ -284,6 +331,26 @@ class WakeWordListener:
         # Collapse to 1-D int16 — openWakeWord requirement.
         audio: np.ndarray = indata[:, 0] if indata.ndim > 1 else indata
 
+        if self._capturing:
+            self._capture_frame(audio)
+        else:
+            self._detect_wake_word(audio)
+
+    # ------------------------------------------------------------------
+    # Listening mode
+    # ------------------------------------------------------------------
+
+    def _detect_wake_word(self, audio: np.ndarray) -> None:
+        """Run openWakeWord on one frame and check for detections.
+
+        Called in listening mode.  On a valid detection, fires
+        ``on_wake`` and enters capture mode.
+
+        Parameters
+        ----------
+        audio:
+            1-D ``int16`` array of ``_BLOCK_SIZE`` samples.
+        """
         predictions: dict[str, float] = self._model.predict(audio)
         now: float = time.monotonic()
 
@@ -308,6 +375,101 @@ class WakeWordListener:
                 logger.exception(
                     "Unhandled exception in on_wake callback for model '%s'",
                     model_name,
+                )
+
+            # Enter capture mode if an on_utterance callback is registered.
+            entered_capture = False
+            if self._on_utterance is not None:
+                self._enter_capture_mode()
+                entered_capture = True
+
+            # If we entered capture mode, stop checking additional
+            # models (the next frame belongs to the utterance).
+            if entered_capture:
+                break
+
+    # ------------------------------------------------------------------
+    # Capture mode
+    # ------------------------------------------------------------------
+
+    def _enter_capture_mode(self) -> None:
+        """Switch to capture mode, resetting frame/RMS state.
+
+        The current frame (the one that triggered detection) is NOT
+        included in the capture buffer — the utterance starts after
+        the wake word.
+        """
+        self._capturing = True
+        self._capture_frames.clear()
+        self._capture_rms.clear()
+        logger.debug("Entered capture mode (max %d frames, silence=%d frames)",
+                     self._max_capture_frames, self._silence_window_frames)
+
+    def _capture_frame(self, audio: np.ndarray) -> None:
+        """Accumulate one frame and check for endpoint conditions.
+
+        Parameters
+        ----------
+        audio:
+            1-D ``int16`` array of ``_BLOCK_SIZE`` samples.
+        """
+        self._capture_frames.append(audio.copy())
+
+        # RMS energy for this frame.
+        rms: float = float(
+            np.sqrt(np.mean(audio.astype(np.float64) ** 2)) / 32768.0
+        )
+        self._capture_rms.append(rms)
+
+        # Check endpoint conditions.
+        ended: bool = False
+        reason: str = ""
+
+        # Timeout.
+        if len(self._capture_frames) >= self._max_capture_frames:
+            ended = True
+            reason = "timeout"
+        # Silence endpoint.
+        elif (
+            len(self._capture_frames) > self._min_speech_frames
+            and len(self._capture_rms) == self._silence_window_frames
+            and all(v < self._capture_silence_threshold for v in self._capture_rms)
+        ):
+            ended = True
+            reason = "silence"
+
+        if ended:
+            self._emit_utterance()
+
+    def _emit_utterance(self) -> None:
+        """Concatenate captured frames and call ``on_utterance``.
+
+        Returns to listening mode afterwards.  If no frames were
+        captured (shouldn't happen), the callback is not invoked.
+        """
+        self._capturing = False
+
+        if not self._capture_frames:
+            logger.debug("No frames captured; returning to listening mode")
+            return
+
+        utterance: np.ndarray = np.concatenate(self._capture_frames)
+        total_seconds: float = len(utterance) / _SAMPLE_RATE
+        logger.info(
+            "Utterance captured: %.2fs (%d frames)",
+            total_seconds,
+            len(self._capture_frames),
+        )
+
+        self._capture_frames.clear()
+        self._capture_rms.clear()
+
+        if self._on_utterance is not None:
+            try:
+                self._on_utterance(utterance)
+            except Exception:
+                logger.exception(
+                    "Unhandled exception in on_utterance callback"
                 )
 
     # ------------------------------------------------------------------
@@ -399,6 +561,8 @@ def main() -> None:
 
     Parses command-line arguments and starts a :class:`WakeWordListener`
     with the user's configuration.  Detections are printed to stdout.
+    If no ``--model`` is provided, all built-in models are loaded
+    (including ``hey_jarvis``).
 
     Exit codes:
         0 — clean shutdown (interrupt or signal).

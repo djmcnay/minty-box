@@ -10,7 +10,13 @@ import numpy as np
 import pytest
 
 from minty_box import WakeWordListener
-from minty_box.wake import _BUILTIN_MODELS, _COOLDOWN_SECONDS, _DEFAULT_THRESHOLD
+from minty_box.wake import (
+    _BLOCK_SIZE,
+    _BUILTIN_MODELS,
+    _COOLDOWN_SECONDS,
+    _DEFAULT_THRESHOLD,
+    _SAMPLE_RATE,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -396,6 +402,195 @@ class TestAudioCallback:
         assert on_wake.call_count == 2
         called_models = {call.args[0] for call in on_wake.call_args_list}
         assert called_models == {"alexa", "timer"}
+
+
+# ---------------------------------------------------------------------------
+# Utterance capture
+# ---------------------------------------------------------------------------
+
+class TestUtteranceCapture:
+    """Tests for the built-in utterance capture pipeline.
+
+    Verifies that after a wake word fires (with ``on_utterance``
+    registered) the listener enters capture mode, accumulates frames,
+    detects silence, and emits the buffer without opening a second
+    stream.
+    """
+
+    @staticmethod
+    def _make_listener(
+        on_wake: MagicMock,
+        on_utterance: MagicMock | None = None,
+        **kwargs: Any,
+    ) -> WakeWordListener:
+        """Build a ``WakeWordListener`` with a mocked Model, controlled
+        capture params, and a fake input device."""
+        model = MagicMock()
+        model.predict.return_value = {}
+
+        with patch("minty_box.wake.sd.query_devices", return_value=[]):
+            kwargs.setdefault("capture_silence_duration", 0.16)
+            kwargs.setdefault("capture_timeout", 5.0)
+            listener = WakeWordListener(
+                on_wake=on_wake,
+                on_utterance=on_utterance,
+                input_device=0,
+                **kwargs,
+            )
+        listener._model = model
+        return listener
+
+    @staticmethod
+    def _loud_frame() -> np.ndarray:
+        """A frame well above the silence threshold."""
+        return np.full((_BLOCK_SIZE, 1), 16384, dtype=np.int16)
+
+    @staticmethod
+    def _silent_frame() -> np.ndarray:
+        """A frame well below the silence threshold."""
+        return np.zeros((_BLOCK_SIZE, 1), dtype=np.int16)
+
+    def test_enters_capture_after_wake_word(self, on_wake: MagicMock) -> None:
+        """When a detection fires and on_utterance is set, the listener
+        enters capture mode."""
+        on_utterance = MagicMock()
+        listener = self._make_listener(on_wake, on_utterance)
+        listener._model.predict.return_value = {"hey_jarvis": 0.9}
+
+        listener._audio_callback(
+            self._loud_frame(), _BLOCK_SIZE, MagicMock(), 0,
+        )
+
+        on_wake.assert_called_once()
+        assert listener._capturing is True
+
+    def test_does_not_enter_capture_without_on_utterance(
+        self, on_wake: MagicMock,
+    ) -> None:
+        """No capture is attempted when on_utterance is None."""
+        listener = self._make_listener(on_wake, on_utterance=None)
+        listener._model.predict.return_value = {"hey_jarvis": 0.9}
+
+        listener._audio_callback(
+            self._loud_frame(), _BLOCK_SIZE, MagicMock(), 0,
+        )
+
+        on_wake.assert_called_once()
+        assert listener._capturing is False
+
+    def test_captures_and_emits_on_silence(self, on_wake: MagicMock) -> None:
+        """After entering capture, the listener accumulates frames until
+        the silence window is full, then calls on_utterance."""
+        on_utterance = MagicMock()
+        listener = self._make_listener(on_wake, on_utterance)
+        listener._model.predict.return_value = {"hey_jarvis": 0.9}
+
+        # First frame triggers detection → enter capture mode.
+        listener._audio_callback(
+            self._loud_frame(), _BLOCK_SIZE, MagicMock(), 0,
+        )
+        on_wake.assert_called_once()
+        assert listener._capturing is True
+
+        # Feed loud speech frames (need > min_speech_frames = 7).
+        for _ in range(8):
+            listener._audio_callback(
+                self._loud_frame(), _BLOCK_SIZE, MagicMock(), 0,
+            )
+
+        # Feed two silent frames to fill the silence window.
+        listener._audio_callback(
+            self._silent_frame(), _BLOCK_SIZE, MagicMock(), 0,
+        )
+        listener._audio_callback(
+            self._silent_frame(), _BLOCK_SIZE, MagicMock(), 0,
+        )
+
+        # on_utterance should have been called exactly once.
+        on_utterance.assert_called_once()
+        emitted_audio = on_utterance.call_args[0][0]
+        assert isinstance(emitted_audio, np.ndarray)
+        assert emitted_audio.dtype == np.int16
+        # Should have accumulated: 8 loud + 2 silent = 10 frames.
+        assert emitted_audio.shape[0] == _BLOCK_SIZE * 10
+
+        # Listener should have returned to listening mode.
+        assert listener._capturing is False
+
+    def test_timeout_emits_utterance(self, on_wake: MagicMock) -> None:
+        """When the stream is constantly loud, the capture timeout ends
+        the recording and emits the buffer."""
+        on_utterance = MagicMock()
+        # Short timeout = 4 frames.
+        listener = self._make_listener(
+            on_wake, on_utterance, capture_timeout=4 * _BLOCK_SIZE / _SAMPLE_RATE,
+        )
+        listener._model.predict.return_value = {"hey_jarvis": 0.9}
+
+        # Trigger.
+        listener._audio_callback(
+            self._loud_frame(), _BLOCK_SIZE, MagicMock(), 0,
+        )
+
+        # Feed constantly loud — enough to hit max_frames=4.
+        for _ in range(4):
+            listener._audio_callback(
+                self._loud_frame(), _BLOCK_SIZE, MagicMock(), 0,
+            )
+
+        on_utterance.assert_called_once()
+        assert listener._capturing is False
+
+    def test_no_utterance_callback_emitted_without_min_speech(
+        self, on_wake: MagicMock,
+    ) -> None:
+        """Silence immediately after wake word doesn't emit until
+        minimum speech frames have been recorded."""
+        on_utterance = MagicMock()
+        listener = self._make_listener(on_wake, on_utterance)
+        listener._model.predict.return_value = {"hey_jarvis": 0.9}
+
+        # Trigger.
+        listener._audio_callback(
+            self._loud_frame(), _BLOCK_SIZE, MagicMock(), 0,
+        )
+
+        # Feed only 3 frames before silence — should NOT emit.
+        for _ in range(3):
+            listener._audio_callback(
+                self._loud_frame(), _BLOCK_SIZE, MagicMock(), 0,
+            )
+        # Then silence.
+        listener._audio_callback(
+            self._silent_frame(), _BLOCK_SIZE, MagicMock(), 0,
+        )
+        listener._audio_callback(
+            self._silent_frame(), _BLOCK_SIZE, MagicMock(), 0,
+        )
+
+        # Still not emitted (min_speech_frames = 7, we only had 3 loud).
+        on_utterance.assert_not_called()
+        assert listener._capturing is True
+
+    def test_wake_word_break_on_capture(self, on_wake: MagicMock) -> None:
+        """When capture mode is entered, only the first detection in
+        a frame fires.  Multi-model detections in the same frame are
+        suppressed to avoid capture-state corruption."""
+        on_utterance = MagicMock()
+        listener = self._make_listener(on_wake, on_utterance)
+        listener._model.predict.return_value = {
+            "alexa": 0.9,
+            "hey_jarvis": 0.9,
+            "timer": 0.9,
+        }
+
+        listener._audio_callback(
+            self._loud_frame(), _BLOCK_SIZE, MagicMock(), 0,
+        )
+
+        # Only one wake callback, not three.
+        assert on_wake.call_count == 1
+        assert listener._capturing is True
 
 
 # ---------------------------------------------------------------------------

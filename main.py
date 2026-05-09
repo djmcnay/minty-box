@@ -1,8 +1,15 @@
 """Minty Box — integration harness.
 
 Wires wake word detection and speech-to-text together for testing.
-Every time a wake word fires, the utterance that follows is recorded
-and transcribed, then saved as a timestamped JSON file.
+Every time a wake word fires, the utterance that follows is captured
+from the same audio stream and transcribed, then saved as a
+timestamped JSON file.
+
+Architecture:
+    Single ALSA stream → wake word detection (openWakeWord)
+        → on_wake fires → capture mode (same stream, RMS silence detection)
+        → on_utterance delivers buffer → stt.transcribe_buffer()
+        → JSON saved to captures/
 
 Usage:
     uv run python main.py                     # all built-in models
@@ -21,6 +28,8 @@ import logging
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+import numpy as np
 
 from minty_box.stt import SpeechToText
 from minty_box.wake import WakeWordListener
@@ -91,26 +100,43 @@ def main() -> None:
                 parser.error(f"Model not found: {path}")
             model_paths.append(str(path))
 
+    # Track the last wake word details for the JSON record.
+    last_wake: dict = {}
+
     def on_wake(wake_word: str, score: float) -> None:
-        """Handle a wake word detection: record, transcribe, save JSON."""
-        timestamp = datetime.now(timezone.utc)
+        """Called when a wake word is detected.  Stores details for the
+        subsequent on_utterance callback."""
+        last_wake["word"] = wake_word
+        last_wake["score"] = score
+        last_wake["timestamp"] = datetime.now(timezone.utc)
 
         print(
             f"\n🎤 Wake word: '{wake_word}' (score={score:.4f})"
             f"\n   Listening for command..."
         )
 
+    def on_utterance(audio: np.ndarray) -> None:
+        """Called with the captured utterance buffer (int16, 16kHz mono).
+        Transcribes and saves a JSON record."""
+        wake_timestamp: datetime | None = last_wake.pop("timestamp", None)
+        if wake_timestamp is None:
+            logger.warning("on_utterance called without a preceding wake word")
+            return
+
+        wake_word: str = last_wake.pop("word", "unknown")
+        wake_score: float = last_wake.pop("score", 0.0)
+
         try:
-            result = stt.listen_and_transcribe(timeout=10.0)
+            result = stt.transcribe_buffer(audio)
         except Exception:
-            logger.exception("STT failed during listen_and_transcribe")
+            logger.exception("STT failed during transcribe_buffer")
             return
 
         # Build the capture record.
         record = {
-            "timestamp": timestamp.isoformat(),
+            "timestamp": wake_timestamp.isoformat(),
             "wake_word": wake_word,
-            "wake_score": score,
+            "wake_score": wake_score,
             "transcription": result.text,
             "raw_transcription": result.raw_text,
             "language": result.language,
@@ -120,7 +146,7 @@ def main() -> None:
         }
 
         # Write JSON file.
-        filename = timestamp.strftime("%Y-%m-%dT%H-%M-%S") + ".json"
+        filename = wake_timestamp.strftime("%Y-%m-%dT%H-%M-%S") + ".json"
         path = output_dir / filename
 
         with open(path, "w") as f:
@@ -132,6 +158,7 @@ def main() -> None:
     # Start the wake word listener (blocks).
     listener = WakeWordListener(
         on_wake=on_wake,
+        on_utterance=on_utterance,
         model_paths=model_paths,
         threshold=args.threshold,
         enable_vad=not args.no_vad,
