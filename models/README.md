@@ -1,0 +1,1 @@
+# Custom wake word models\n\nDrop your trained .onnx files here. They are gitignored by default;\nonly this directory structure is tracked.\n\nFor quick testing without a custom model, the built-in wake words\n(alexa, hey_mycroft, hey_jarvis, timer, weather) work without any\nfiles here:\n\n    uv run python -m minty_box.wake
