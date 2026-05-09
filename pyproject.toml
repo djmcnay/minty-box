@@ -1,10 +1,25 @@
 [project]
 name = "minty-box"
 version = "0.1.0"
-description = "Add your description here"
+description = "Araminta's physical hardware companion — Raspberry Pi 5 voice interface"
 requires-python = ">=3.14.3"
 dependencies = [
     "numpy>=2.4.4",
     "openwakeword>=0.4.0",
     "sounddevice>=0.5.5",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = ["-v", "--tb=short"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
 ]
