@@ -502,31 +502,45 @@ class WakeWordListener:
 
     @staticmethod
     def _find_respeaker() -> str | int:
-        """Locate the ReSpeaker Lite in sounddevice's device list.
+        """Locate a capture-capable ReSpeaker Lite in sounddevice's
+        device list.
 
         Iterates all audio devices and returns the index of the first
-        whose ``name`` field contains ``"ReSpeaker Lite"``.  Using the
-        integer index avoids ambiguity when multiple devices share
-        substring matches.
+        whose ``name`` field contains ``"ReSpeaker Lite"`` **and** has
+        ``max_input_channels > 0``.
+
+        PortAudio on the Pi 5 enumerates the ReSpeaker Lite as an
+        output-only device (``max_input_channels=0``) at the ALSA
+        level; the actual capture path routes through the PulseAudio
+        device.  If no ReSpeaker-named device has input channels, the
+        default system input is used instead — which will be the
+        PulseAudio device that transparently routes ReSpeaker capture.
 
         Returns
         -------
         str | int
-            sounddevice device identifier (integer index if found,
-            system default input device otherwise).
+            sounddevice device identifier (integer index if a
+            capture-capable ReSpeaker device is found, system default
+            input device otherwise).
 
         Warns
         -----
         Logs a warning and falls back to the system default if no
-        ReSpeaker Lite is detected.
+        ReSpeaker Lite with input channels is detected.
         """
         devices: list[dict] = sd.query_devices()
         for idx, dev in enumerate(devices):
-            if _RESPEAKER_NAME in dev["name"]:
+            if (_RESPEAKER_NAME in dev["name"]
+                    and dev.get("max_input_channels", 0) > 0):
+                logger.debug(
+                    "Found ReSpeaker Lite at index %d (%d input ch)",
+                    idx, dev["max_input_channels"],
+                )
                 return idx
         logger.warning(
-            "ReSpeaker Lite not found in devices. "
-            "Using system default. Available devices: %s",
+            "No capture-capable ReSpeaker Lite found (ALSA enumerates "
+            "it as output-only). Falling back to system default input "
+            "device. Available devices: %s",
             [d["name"] for d in devices],
         )
         return sd.default.device[0]  # type: ignore[return-value]
