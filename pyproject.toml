@@ -3,4 +3,8 @@ name = "minty-box"
 version = "0.1.0"
 description = "Add your description here"
 requires-python = ">=3.14.3"
-dependencies = []
+dependencies = [
+    "numpy>=2.4.4",
+    "openwakeword>=0.4.0",
+    "sounddevice>=0.5.5",
+]
