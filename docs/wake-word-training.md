@@ -2,8 +2,8 @@
 
 How to create a custom "Araminta" wake word model for use with the Minty Box
 wake word listener. Training uses 100% synthetic speech — no manual audio
-recording required. You provide the two words ("Araminta") and the tooling
-handles the rest.
+recording required. You provide the wake word and the tooling handles the
+rest.
 
 ## Why "Araminta"
 
@@ -15,63 +15,72 @@ enough for very low false activations.
 
 ## Prerequisites
 
-- A Google account (for Colab)
-- 45–60 minutes (mostly unattended)
-- No GPU required — training runs on Colab's free tier
+- A GitHub or email account (for sign-in)
+- ~45–60 minutes (mostly unattended — training runs on cloud GPUs)
+- No local setup required
 
-## Step 1: Open the Training Notebook
+## Step 1: Go to openWakeWord.com
 
-openWakeWord provides a one-click Colab notebook for this exact workflow:
+The training service is at:
 
-**https://colab.research.google.com/drive/1q1oe2zOyZp7UsB3jJiQ1IFn8z5YfjwEb**
+**https://openwakeword.com/**
 
-Click "Copy to Drive" to get your own editable copy.
+Click **"Sign In"** in the top-right corner. You can sign in with GitHub or
+email — no subscription required. The service is built and maintained by
+David Scripka, the author of openWakeWord.
 
-## Step 2: Configure the Wake Word
+## Step 2: Enter Your Wake Word
 
-In the notebook's configuration cell, set:
+Type "Araminta" on the training page. The service accepts any word or phrase
+in any language.
 
-```python
-target_word = "aramintha"  # phonetic spelling works better for TTS
-# The model name will be "araminta" — cleaner
-model_name = "araminta"
+**Phonetic spelling tip:** If you're unsure how the TTS voices will pronounce
+"Araminta", you can use the phonetic spelling `aramintha` to nudge them
+toward the right sound. The model name will still be `araminta` — the
+phonetic version is only used during synthetic speech generation.
+
+## Step 3: Preview with Multiple AI Voices
+
+Before committing to training, the service lets you **preview** how
+"Araminta" sounds when spoken by different AI voices. Listen to a few. If
+the pronunciation sounds wrong — "air-a-min-tuh" when you want
+"ah-ra-min-tah" — adjust the phonetic spelling and preview again. This is
+the single biggest advantage over the Colab workflow: you catch TTS
+pronunciation issues *before* training.
+
+## Step 4: Set Training Parameters (or Skip)
+
+The service offers a few configuration options:
+
+| Parameter | Recommendation |
+|-----------|---------------|
+| Sample count | Default (~5,000) is fine for a first model |
+| Language mix | English-only for "Araminta" |
+| Training intensity | Default |
+
+You can leave everything at defaults and hit train — the defaults produce
+a solid model. If you later want lower false activations, retrain with
+higher sample counts or a custom verifier model.
+
+## Step 5: Train
+
+Click **"Train"** (or equivalent). The model is trained on cloud GPUs and
+typically finishes in under an hour. You'll get a notification when it's
+done.
+
+## Step 6: Download the Model
+
+When training completes, download the `.onnx` file:
+
+```
+araminta.onnx
 ```
 
-Use `aramintha` for the TTS prompt (phonetic) but `araminta` as the model
-file name. The notebook generates thousands of synthetic clips with varied
-voices, accents, room acoustics, and background noise saying "Araminta".
+This is a standard openWakeWord ONNX model — identical in format to the
+ones that ship with the `openwakeword` Python package. It's typically
+sub-100 KB and runs entirely on-device.
 
-## Step 3: Configure Negative Examples
-
-The notebook needs audio that is NOT the wake word for training. Accept the
-defaults — it uses the FSDD50K and MUSAN datasets (speech + noise) which
-provide excellent coverage. No need to change anything here.
-
-## Step 4: Run All Cells
-
-Runtime → Run all. This will:
-
-1. Generate ~5,000 synthetic "Araminta" clips from multiple TTS voices
-2. Mix them with background noise and room impulse responses
-3. Extract the speech embeddings (Google's pre-trained model)
-4. Train a lightweight classifier on top
-5. Validate against held-out test data
-6. Run a false-accept test against 5+ hours of conversational speech
-7. Output the model as `araminta.onnx`
-
-The training runs on Colab's free CPU tier and finishes in ~45 minutes.
-
-## Step 5: Download the Model
-
-When training completes, the notebook saves the model to the Colab
-runtime. Download it:
-
-```python
-from google.colab import files
-files.download('araminta.onnx')
-```
-
-## Step 6: Install on the Pi
+## Step 7: Install on the Pi
 
 Copy the `.onnx` file to the Minty Box:
 
@@ -83,7 +92,7 @@ scp ~/Downloads/araminta.onnx pi@minty-box.local:~/minty-box/models/
 cp araminta.onnx ~/Documents/GitHub/minty-box/models/
 ```
 
-## Step 7: Use with the Listener
+## Step 8: Use with the Listener
 
 ```bash
 cd ~/Documents/GitHub/minty-box
@@ -143,8 +152,8 @@ If the wake word isn't detected reliably:
 1. **Lower the threshold.** Try 0.3 or 0.4.
 2. **Check microphone input.** Run the microphone test from
    [respeaker-lite-setup.md](respeaker-lite-setup.md).
-3. **Retrain with more variation.** The default notebook uses 5 voices;
-   the advanced notebook supports up to 20.
+3. **Retrain with more variation.** Increase the sample count or train
+   with more voices at openWakeWord.com.
 
 ## Advanced: Multi-Wake-Word
 
