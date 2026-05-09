@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Araminta's physical hardware companion — Raspberry Pi 5 voice interface"
 requires-python = ">=3.14.3"
 dependencies = [
+    "faster-whisper>=1.2.1",
     "numpy>=2.4.4",
     "openwakeword>=0.4.0",
     "sounddevice>=0.5.5",
