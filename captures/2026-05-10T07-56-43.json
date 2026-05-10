@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-05-10T07:56:43.026154+00:00",
+  "wake_word": "hey_jarvis",
+  "wake_score": 0.9961380362510681,
+  "transcription": "",
+  "raw_transcription": "Okay, let's go on a minute, three extra four, three extra four, three extra",
+  "language": "en",
+  "language_probability": 1,
+  "audio_duration_s": 14.96,
+  "filter_applied": "confidence"
+}

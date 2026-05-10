@@ -71,7 +71,7 @@ _DEFAULT_COMPUTE_TYPE: str = "int8"
 
 # Disfluency filter defaults.
 _DEFAULT_FILTER_MODE: str = "confidence"  # "confidence" | "regex" | "both"
-_DEFAULT_CONFIDENCE_THRESHOLD: float = -1.0  # logprob threshold for confidence mode
+_DEFAULT_CONFIDENCE_THRESHOLD: float = -2.5  # logprob threshold for confidence mode
 
 # Default filler words for regex mode — matched with word boundaries.
 _DEFAULT_FILLER_WORDS: list[str] = [
