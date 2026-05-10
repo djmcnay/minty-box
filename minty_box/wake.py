@@ -77,8 +77,9 @@ _VAD_THRESHOLD: float = 0.5  # Silero VAD probability threshold
 
 # Utterance capture defaults.
 _CAPTURE_SILENCE_DURATION: float = 1.0  # seconds of quiet before endpoint
-_CAPTURE_SILENCE_THRESHOLD: float = 0.03  # RMS amplitude below which is silence
+_CAPTURE_SILENCE_THRESHOLD: float = 0.05  # RMS amplitude below which is silence
 _CAPTURE_TIMEOUT: float = 15.0  # max capture duration
+_CAPTURE_POST_COOLDOWN: float = 3.0  # suppress wake word detection after capture
 _CAPTURE_MIN_SPEECH: float = 0.5  # minimum speech before allowing endpoint
 
 
@@ -218,6 +219,7 @@ class WakeWordListener:
         self._capturing: bool = False
         self._capture_frames: list[np.ndarray] = []
         self._capture_rms: deque[float] = deque(maxlen=self._silence_window_frames)
+        self._post_capture_until: float = 0.0  # suppress detections until this monotonic time
 
         # Runtime state.
         self._running: bool = False
@@ -354,6 +356,12 @@ class WakeWordListener:
         predictions: dict[str, float] = self._model.predict(audio)
         now: float = time.monotonic()
 
+        # Post-capture suppression: after capture ends, ignore all
+        # detections for _CAPTURE_POST_COOLDOWN seconds to prevent
+        # overflow cascades from triggering phantom wake words.
+        if now < self._post_capture_until:
+            return
+
         for model_name, score in predictions.items():
             if score < self._threshold:
                 continue
@@ -463,6 +471,10 @@ class WakeWordListener:
 
         self._capture_frames.clear()
         self._capture_rms.clear()
+
+        # Suppress wake word detections briefly to prevent
+        # overflow audio from cascading into phantom detections.
+        self._post_capture_until = time.monotonic() + _CAPTURE_POST_COOLDOWN
 
         if self._on_utterance is not None:
             try:

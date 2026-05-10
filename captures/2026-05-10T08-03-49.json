@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-05-10T08:03:49.808636+00:00",
+  "wake_word": "weather",
+  "wake_score": 0.6385312080383301,
+  "transcription": "",
+  "raw_transcription": "Okay.",
+  "language": "en",
+  "language_probability": 1,
+  "audio_duration_s": 1.52,
+  "filter_applied": "confidence"
+}

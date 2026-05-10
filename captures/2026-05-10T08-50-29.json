@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-05-10T08:50:29.683381+00:00",
+  "wake_word": "hey_jarvis",
+  "wake_score": 0.7386837601661682,
+  "transcription": "",
+  "raw_transcription": "Hello, party kids. Bye!",
+  "language": "en",
+  "language_probability": 1,
+  "audio_duration_s": 4.88,
+  "filter_applied": "confidence"
+}

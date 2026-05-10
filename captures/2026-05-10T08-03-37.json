@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-05-10T08:03:37.060930+00:00",
+  "wake_word": "weather",
+  "wake_score": 0.6700364351272583,
+  "transcription": "",
+  "raw_transcription": "Thank you for the speech.",
+  "language": "en",
+  "language_probability": 1,
+  "audio_duration_s": 2.88,
+  "filter_applied": "confidence"
+}

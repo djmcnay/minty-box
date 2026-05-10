@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-05-10T09:10:12.549284+00:00",
+  "wake_word": "hey_jarvis",
+  "wake_score": 0.6678981781005859,
+  "transcription": "",
+  "raw_transcription": "Who's your favorite Marvel character?",
+  "language": "en",
+  "language_probability": 1,
+  "audio_duration_s": 14.96,
+  "filter_applied": "confidence"
+}

@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-05-10T08:03:18.025993+00:00",
+  "wake_word": "weather",
+  "wake_score": 0.8323408365249634,
+  "transcription": "",
+  "raw_transcription": "The whole one we're seeing!",
+  "language": "en",
+  "language_probability": 1,
+  "audio_duration_s": 6.72,
+  "filter_applied": "confidence"
+}

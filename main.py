@@ -86,7 +86,7 @@ def main() -> None:
 
     # Build the STT engine (shared instance — loads model once).
     stt = SpeechToText(
-        disfluency_filter="confidence",
+        disfluency_filter=None,  # disabled — logprobs unreliable on arm64 int8
         custom_words=["Araminta", "Minty", "Moorside", "Conford", "Liphook"],
     )
 

@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-05-10T08:50:15.863079+00:00",
+  "wake_word": "hey_jarvis",
+  "wake_score": 0.8770841360092163,
+  "transcription": "",
+  "raw_transcription": "Please! Come on! Come on! Come on!",
+  "language": "en",
+  "language_probability": 1,
+  "audio_duration_s": 4.56,
+  "filter_applied": "confidence"
+}
