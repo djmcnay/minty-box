@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-05-10T09:22:02.278140+00:00",
+  "wake_word": "weather",
+  "wake_score": 0.7809004783630371,
+  "transcription": "More than half a trillion in service.",
+  "raw_transcription": "More than half a trillion in service.",
+  "language": "en",
+  "language_probability": 1,
+  "audio_duration_s": 1.84,
+  "filter_applied": null
+}

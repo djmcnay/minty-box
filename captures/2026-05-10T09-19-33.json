@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-05-10T09:19:33.708591+00:00",
+  "wake_word": "hey_jarvis",
+  "wake_score": 0.6243893504142761,
+  "transcription": "Who's your favorite model character?",
+  "raw_transcription": "Who's your favorite model character?",
+  "language": "en",
+  "language_probability": 1,
+  "audio_duration_s": 4.96,
+  "filter_applied": null
+}

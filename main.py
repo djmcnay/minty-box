@@ -85,12 +85,19 @@ def main() -> None:
     logger.info("Captures will be saved to: %s", output_dir)
 
     # Build the STT engine (shared instance — loads model once).
+    # base.en: 74M params, ~6x real-time on Pi 5 CPU — much better
+    # accuracy than tiny.en while still well within real-time budgets.
+    # large-v3-turbo would be more accurate but ~1.2x real-time on Pi 5
+    # (a 5s utterance takes 20-25s to transcribe — unacceptable for
+    # voice-assistant use).
     stt = SpeechToText(
+        model_size="base.en",
         disfluency_filter=None,  # disabled — logprobs unreliable on arm64 int8
         custom_words=["Araminta", "Minty", "Moorside", "Conford", "Liphook"],
     )
 
     # Resolve model paths for the wake word listener.
+    # Default: only hey_jarvis (until custom "Araminta" model is trained).
     model_paths: list[str] | None = None
     if args.model:
         model_paths = []
@@ -99,6 +106,9 @@ def main() -> None:
             if not path.exists():
                 parser.error(f"Model not found: {path}")
             model_paths.append(str(path))
+    else:
+        # Single built-in model extracted to models/ for portability.
+        model_paths = [str(Path(__file__).parent / "models" / "hey_jarvis_v0.1.onnx")]
 
     # Track the last wake word details for the JSON record.
     last_wake: dict = {}
