@@ -366,7 +366,7 @@ class SpeechToText:
             "vad_filter": False,
         }
         if self._prompt:
-            transcribe_kwargs["prompt"] = self._prompt
+            transcribe_kwargs["initial_prompt"] = self._prompt
         if self._need_word_timestamps:
             transcribe_kwargs["word_timestamps"] = True
 

@@ -347,7 +347,7 @@ class TestTranscribeBuffer:
             stt.transcribe_buffer(speech_audio)
 
         kwargs = mock_whisper_model.transcribe.call_args[1]
-        assert kwargs.get("prompt") == "Araminta Minty"
+        assert kwargs.get("initial_prompt") == "Araminta Minty"
 
 
 # ---------------------------------------------------------------------------
