@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-05-10T07:50:33.871438+00:00",
+  "wake_word": "hey_jarvis",
+  "wake_score": 0.9671213626861572,
+  "transcription": "",
+  "raw_transcription": "The Airways are in front of the jet, you know, the buses, the roads are in shape of the road, but it's cold, okay?",
+  "language": "en",
+  "language_probability": 1,
+  "audio_duration_s": 14.96,
+  "filter_applied": "confidence"
+}

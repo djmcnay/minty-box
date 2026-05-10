@@ -77,7 +77,7 @@ _VAD_THRESHOLD: float = 0.5  # Silero VAD probability threshold
 
 # Utterance capture defaults.
 _CAPTURE_SILENCE_DURATION: float = 1.5  # seconds of quiet before endpoint
-_CAPTURE_SILENCE_THRESHOLD: float = 0.01  # RMS amplitude below which is silence
+_CAPTURE_SILENCE_THRESHOLD: float = 0.02  # RMS amplitude below which is silence
 _CAPTURE_TIMEOUT: float = 15.0  # max capture duration
 _CAPTURE_MIN_SPEECH: float = 0.5  # minimum speech before allowing endpoint
 
