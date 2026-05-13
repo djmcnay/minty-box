@@ -8,6 +8,3 @@ wheels/
 
 # Virtual environments
 .venv
-
-# Wake word models — track directory structure, ignore .onnx files
-models/*.onnx
