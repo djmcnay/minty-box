@@ -1,18 +1,17 @@
 """
 Speech-to-text transcription using faster-whisper.
 
-Captures audio from the ReSpeaker Lite microphone after a wake word
-trigger, detects silence to end the utterance, and transcribes using
-a Whisper model via CTranslate2 acceleration. Runs entirely on CPU.
+Transcribes pre-recorded audio buffers (16 kHz int16 mono) via a
+quantised Whisper model. Runs entirely on CPU. Audio capture is
+the responsibility of ``WakeWordListener``; this module only
+transcribes the buffer it is handed.
 
 Supports custom word biasing (Whisper prompt injection) and optional
 disfluency filtering — confidence-gated (Level 3) with regex fallback
 (Level 2).
 
 Architecture:
-    Wake word detected
-        → record audio from ReSpeaker Lite
-        → silence detection (RMS energy threshold)
+    buffer (16 kHz int16) from WakeWordListener.on_utterance
         → faster-whisper (Whisper → CTranslate2 → ONNX → CPU)
             with custom word prompt biasing and word_timestamps
         → disfluency filter (confidence or regex)
@@ -37,7 +36,6 @@ from __future__ import annotations
 import logging
 import re
 import time
-from collections import deque
 from dataclasses import dataclass, field
 from typing import Literal, Optional
 
@@ -51,19 +49,11 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-# Substring used to identify the ReSpeaker Lite for recording.
+# Substring used to identify the ReSpeaker Lite for the device lookup.
 _RESPEAKER_NAME: str = "ReSpeaker Lite"
 
-# Audio format.
+# Audio format expected by Whisper. Buffers handed in must be 16 kHz.
 _SAMPLE_RATE: int = 16000
-_CHANNELS: int = 1
-_BLOCK_SIZE: int = 1280  # 80 ms frames
-_DTYPE: str = "int16"
-
-# Silence detection defaults.
-_DEFAULT_SILENCE_DURATION: float = 1.5  # seconds of quiet before endpointing
-_DEFAULT_SILENCE_THRESHOLD: float = 0.01  # RMS amplitude threshold
-_DEFAULT_TIMEOUT: float = 15.0  # maximum recording duration
 
 # Model defaults.
 _DEFAULT_MODEL_SIZE: str = "tiny.en"
@@ -73,7 +63,11 @@ _DEFAULT_COMPUTE_TYPE: str = "int8"
 _DEFAULT_FILTER_MODE: str = "confidence"  # "confidence" | "regex" | "both"
 _DEFAULT_CONFIDENCE_THRESHOLD: float = -2.5  # logprob threshold for confidence mode
 
-# Default filler words for regex mode — matched with word boundaries.
+# Default filler words for regex mode — non-lexical hesitations only.
+# Common words like "so", "well", "right", "like", "actually" are *not*
+# included by default: stripping them can silently change meaning
+# ("turn right" → "turn"). Pass `filler_words=` to extend the list if
+# you want them gone for a specific use case.
 _DEFAULT_FILLER_WORDS: list[str] = [
     "um",
     "uh",
@@ -82,19 +76,6 @@ _DEFAULT_FILLER_WORDS: list[str] = [
     "mm",
     "ah",
     "erm",
-    "I mean",
-    "you know",
-    "sort of",
-    "kind of",
-    "I guess",
-    "like",
-    "actually",
-    "basically",
-    "literally",
-    "right",
-    "okay so",
-    "so",
-    "well",
 ]
 
 # ---------------------------------------------------------------------------
@@ -148,9 +129,11 @@ class TranscriptionResult:
 class SpeechToText:
     """Speech-to-text using faster-whisper on CPU.
 
-    Loads a quantised Whisper model (:mod:`faster_whisper`) and provides
-    methods for transcribing pre-recorded audio buffers or recording
-    directly from a microphone with silence-based endpoint detection.
+    Loads a quantised Whisper model (:mod:`faster_whisper`) and
+    transcribes pre-recorded audio buffers.  Audio capture (mic
+    streaming, silence endpointing) is handled by
+    :class:`~minty_box.wake.WakeWordListener` — this class only
+    transcribes the buffer it is handed.
 
     Supports custom word biasing via Whisper's ``prompt`` parameter and
     configurable disfluency filtering.
@@ -169,15 +152,10 @@ class SpeechToText:
         Quantisation type for CTranslate2.  ``"int8"`` is the best
         balance of speed and accuracy on ARM64 CPU.
     input_device:
-        sounddevice device identifier for recording.  If ``None``,
-        auto-detects ReSpeaker Lite.
-    silence_duration:
-        Seconds of continuous silence before ending the utterance
-        during :meth:`listen_and_transcribe`.
-    silence_threshold:
-        RMS amplitude threshold below which audio is considered
-        silence.  Calibrate for your environment — quiet cottages
-        may want a lower value, noisy rooms a higher one.
+        sounddevice device identifier.  Recorded here for parity with
+        the wake listener; not used for capture (this class never
+        opens an audio stream).  If ``None``, auto-detects
+        ReSpeaker Lite.
     beam_size:
         Beam search width during transcription.  Larger values improve
         accuracy at the cost of speed.  Default 1 is greedy decoding
@@ -197,21 +175,21 @@ class SpeechToText:
         (``text`` == ``raw_text``).
     confidence_threshold:
         Logprob threshold for confidence-based filtering.  Tokens with
-        log probability below this value are dropped.  Default ``-1.0``
-        is a reasonable starting point; lower values are more
-        aggressive.  Only meaningful when ``disfluency_filter`` is
-        ``"confidence"`` or ``"both"``.
+        log probability below this value are dropped.  Default
+        ``-2.5`` is fairly permissive; raise toward ``-1.0`` for more
+        aggressive filtering.  Only meaningful when
+        ``disfluency_filter`` is ``"confidence"`` or ``"both"``.
     filler_words:
         Custom list of filler words/phrases for regex mode.  Matched
         case-insensitively with word boundaries.  Defaults to
-        `_DEFAULT_FILLER_WORDS` if not provided.
+        `_DEFAULT_FILLER_WORDS` (non-lexical hesitations only).
 
     Notes
     -----
-    - The first call to :meth:`transcribe_buffer` or
-      :meth:`listen_and_transcribe` triggers model download if not
-      already cached.  Models are cached by :mod:`faster_whisper` in
-      the HuggingFace Hub cache (~/.cache/huggingface/).
+    - The first call to :meth:`transcribe_buffer` triggers model
+      download if not already cached.  Models are cached by
+      :mod:`faster_whisper` in the HuggingFace Hub cache
+      (``~/.cache/huggingface/``).
     - ``tiny.en`` is ~75 MB and transcribes ~10x faster than real-time
       on a Pi 5.  ``base.en`` is ~150 MB and ~5x real-time.
     - Confidence mode requires ``word_timestamps=True``, which adds a
@@ -240,8 +218,6 @@ class SpeechToText:
         device: str = "cpu",
         compute_type: str = _DEFAULT_COMPUTE_TYPE,
         input_device: str | int | None = None,
-        silence_duration: float = _DEFAULT_SILENCE_DURATION,
-        silence_threshold: float = _DEFAULT_SILENCE_THRESHOLD,
         beam_size: int = 1,
         custom_words: list[str] | None = None,
         disfluency_filter: DisfluencyFilterMode | None = _DEFAULT_FILTER_MODE,
@@ -271,8 +247,6 @@ class SpeechToText:
             )
 
         self._model_size: str = model_size
-        self._silence_duration: float = silence_duration
-        self._silence_threshold: float = silence_threshold
         self._beam_size: int = beam_size
 
         # Custom word biasing.
@@ -413,110 +387,6 @@ class SpeechToText:
             filter_applied=filter_applied,
         )
 
-    def listen_and_transcribe(
-        self,
-        timeout: float = _DEFAULT_TIMEOUT,
-    ) -> TranscriptionResult:
-        """Record audio from the microphone until silence, then transcribe.
-
-        Opens an input stream, accumulates audio frames, and monitors
-        the RMS energy.  When the energy stays below
-        ``silence_threshold`` for ``silence_duration`` seconds
-        continuously, recording stops and the buffer is transcribed.
-        A ``timeout`` prevents indefinite recording if the user walks
-        away.
-
-        Parameters
-        ----------
-        timeout:
-            Maximum recording duration in seconds.  If reached, the
-            accumulated audio is transcribed regardless of silence.
-
-        Returns
-        -------
-        TranscriptionResult
-            Transcribed text from the recorded utterance.
-
-        Notes
-        -----
-        This method blocks until recording completes.  It is designed
-        to be called directly from a wake word callback.
-        """
-        logger.info(
-            "Listening for speech... (timeout=%.1fs, "
-            "silence_duration=%.1fs, threshold=%.4f)",
-            timeout,
-            self._silence_duration,
-            self._silence_threshold,
-        )
-
-        # Rolling window for silence detection.
-        # Each frame is 80 ms; window covers silence_duration seconds.
-        window_frames: int = max(
-            1, int(self._silence_duration / (_BLOCK_SIZE / _SAMPLE_RATE))
-        )
-        recent_rms: deque[float] = deque(maxlen=window_frames)
-
-        # Minimum speech: require at least 0.5s of audio before
-        # allowing silence to end the recording.  Measured in frames
-        # rather than wall-clock time so tests run deterministically.
-        min_speech_frames: int = max(
-            1, int(0.5 * _SAMPLE_RATE / _BLOCK_SIZE)
-        )
-
-        # Accumulated audio.
-        frames: list[np.ndarray] = []
-
-        frames_per_second: float = _SAMPLE_RATE / _BLOCK_SIZE
-        max_frames: int = int(timeout * frames_per_second)
-
-        start_time: float = time.monotonic()
-
-        with sd.InputStream(
-            device=self._device,
-            samplerate=_SAMPLE_RATE,
-            channels=_CHANNELS,
-            dtype=_DTYPE,
-            blocksize=_BLOCK_SIZE,
-        ) as stream:
-            while len(frames) < max_frames:
-                data, _overflowed = stream.read(_BLOCK_SIZE)
-                audio_block: np.ndarray = data[:, 0]
-                frames.append(audio_block)
-
-                # RMS energy for this block.
-                rms: float = float(np.sqrt(np.mean(audio_block.astype(np.float64) ** 2)) / 32768.0)
-                recent_rms.append(rms)
-
-                # Silence endpoint: window is full, minimum speech
-                # frames have been recorded, and all values in the
-                # window are below threshold.
-                if (
-                    len(frames) > min_speech_frames
-                    and len(recent_rms) == window_frames
-                    and all(v < self._silence_threshold for v in recent_rms)
-                ):
-                    logger.debug(
-                        "Silence detected after %d frames (%d quiet frames)",
-                        len(frames),
-                        window_frames,
-                    )
-                    break
-
-        elapsed_total: float = time.monotonic() - start_time
-        logger.info(
-            "Recorded %.2fs of audio (%d frames)",
-            elapsed_total,
-            len(frames),
-        )
-
-        if not frames:
-            logger.warning("No audio recorded")
-            return TranscriptionResult(text="")
-
-        audio: np.ndarray = np.concatenate(frames)
-        return self.transcribe_buffer(audio)
-
     # ------------------------------------------------------------------
     # Custom word biasing
     # ------------------------------------------------------------------
@@ -526,7 +396,9 @@ class SpeechToText:
 
         The prompt is passed as previous-text context, which biases the
         decoder toward these tokens without breaking the language model.
-        Format: comma-separated list in a natural-looking sentence.
+        Format: words joined by single spaces (e.g.
+        ``"Araminta Minty Moorside"``) — Whisper handles this fine as
+        pseudo-prior-text.
 
         Returns
         -------

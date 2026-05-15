@@ -1,7 +1,7 @@
 [project]
 name = "minty-box"
 version = "0.1.0"
-description = "Araminta's physical hardware companion — Raspberry Pi 5 voice interface"
+description = "Araminta's physical hardware companion - Raspberry Pi 5 voice interface"
 requires-python = ">=3.14.3"
 dependencies = [
     "faster-whisper>=1.2.1",
@@ -14,6 +14,16 @@ dependencies = [
 dev = [
     "pytest>=8.0",
 ]
+
+[project.scripts]
+minty-box = "minty_box.cli:main"
+
+[build-system]
+requires = ["setuptools>=77.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["minty_box*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
