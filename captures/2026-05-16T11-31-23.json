@@ -1,0 +1,12 @@
+{
+  "timestamp": "2026-05-16T11:31:23.558958+00:00",
+  "wake_word": "Araminta",
+  "wake_score": 0.5709459781646729,
+  "transcription": "What time is it?",
+  "raw_transcription": "What time is it?",
+  "language": "en",
+  "language_probability": 1,
+  "audio_duration_s": 2.48,
+  "filter_applied": null,
+  "handler": "hermes-api"
+}

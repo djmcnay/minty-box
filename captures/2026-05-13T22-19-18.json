@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-05-13T22:19:18.571665+00:00",
+  "wake_word": "Araminta",
+  "wake_score": 0.7860400080680847,
+  "transcription": "Just wondering if you can hit.",
+  "raw_transcription": "Just wondering if you can hit.",
+  "language": "en",
+  "language_probability": 1,
+  "audio_duration_s": 0.96,
+  "filter_applied": null
+}

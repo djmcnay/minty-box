@@ -1,0 +1,12 @@
+{
+  "timestamp": "2026-05-14T17:03:06.625777+00:00",
+  "wake_word": "Araminta",
+  "wake_score": 0.6163851022720337,
+  "transcription": "Tada! Let's get these!",
+  "raw_transcription": "Tada! Let's get these!",
+  "language": "en",
+  "language_probability": 1,
+  "audio_duration_s": 4.0,
+  "filter_applied": null,
+  "mode": "warm"
+}

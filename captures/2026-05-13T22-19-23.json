@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-05-13T22:19:23.024100+00:00",
+  "wake_word": "Araminta",
+  "wake_score": 0.6683422327041626,
+  "transcription": "",
+  "raw_transcription": "",
+  "language": "en",
+  "language_probability": 1,
+  "audio_duration_s": 2.4,
+  "filter_applied": null
+}

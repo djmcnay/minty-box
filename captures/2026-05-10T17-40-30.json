@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-05-10T17:40:30.499116+00:00",
+  "wake_word": "hey_jarvis_v0.1",
+  "wake_score": 0.576042115688324,
+  "transcription": "So what do you see? A chah, a chah, a chah, a chah, a chah, a chah. And then a chah.",
+  "raw_transcription": "So what do you see? A chah, a chah, a chah, a chah, a chah, a chah. And then a chah.",
+  "language": "en",
+  "language_probability": 1,
+  "audio_duration_s": 4.88,
+  "filter_applied": null
+}

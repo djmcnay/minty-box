@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-05-10T19:31:03.439123+00:00",
+  "wake_word": "hey_jarvis_v0.1",
+  "wake_score": 0.9464589357376099,
+  "transcription": "I'm wondering if you're going to pick this up.",
+  "raw_transcription": "I'm wondering if you're going to pick this up.",
+  "language": "en",
+  "language_probability": 1,
+  "audio_duration_s": 8.96,
+  "filter_applied": null
+}

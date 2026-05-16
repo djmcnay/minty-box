@@ -1,0 +1,12 @@
+{
+  "timestamp": "2026-05-14T13:51:33.056781+00:00",
+  "wake_word": "Araminta",
+  "wake_score": 0.8733917474746704,
+  "transcription": "Liphook",
+  "raw_transcription": "Liphook",
+  "language": "en",
+  "language_probability": 1,
+  "audio_duration_s": 1.12,
+  "filter_applied": null,
+  "mode": "single-shot"
+}

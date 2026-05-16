@@ -492,8 +492,10 @@ class TestUtteranceCapture:
         on_wake.assert_called_once()
         assert listener._capturing is True
 
-        # Feed loud speech frames (need > min_speech_frames = 7).
-        for _ in range(8):
+        # Feed loud speech frames (need > min_speech_frames = 7,
+        # plus 3 flush frames discarded first = 10 feed calls to get
+        # 7 accumulated speech frames + silent frames to endpoint).
+        for _ in range(11):
             listener._audio_callback(
                 self._loud_frame(), _BLOCK_SIZE, MagicMock(), 0,
             )
@@ -532,8 +534,9 @@ class TestUtteranceCapture:
             self._loud_frame(), _BLOCK_SIZE, MagicMock(), 0,
         )
 
-        # Feed constantly loud — enough to hit max_frames=4.
-        for _ in range(4):
+        # Feed constantly loud — enough to hit max_frames=4 (need 7:
+        # 3 flush frames discarded + 4 accumulated to reach max).
+        for _ in range(7):
             listener._audio_callback(
                 self._loud_frame(), _BLOCK_SIZE, MagicMock(), 0,
             )

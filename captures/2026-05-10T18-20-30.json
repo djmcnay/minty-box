@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-05-10T18:20:30.920058+00:00",
+  "wake_word": "hey_jarvis_v0.1",
+  "wake_score": 0.9579428434371948,
+  "transcription": "Boy!",
+  "raw_transcription": "Boy!",
+  "language": "en",
+  "language_probability": 1,
+  "audio_duration_s": 1.28,
+  "filter_applied": null
+}

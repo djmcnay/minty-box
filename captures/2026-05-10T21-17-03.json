@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-05-10T21:17:03.112145+00:00",
+  "wake_word": "hey_jarvis_v0.1",
+  "wake_score": 0.5016218423843384,
+  "transcription": "Time to watch the fight!",
+  "raw_transcription": "Time to watch the fight!",
+  "language": "en",
+  "language_probability": 1,
+  "audio_duration_s": 3.68,
+  "filter_applied": null
+}

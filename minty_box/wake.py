@@ -81,6 +81,7 @@ _CAPTURE_SILENCE_THRESHOLD: float = 0.05  # RMS amplitude below which is silence
 _CAPTURE_TIMEOUT: float = 15.0  # max capture duration
 _CAPTURE_POST_COOLDOWN: float = 3.0  # suppress wake word detection after capture
 _CAPTURE_MIN_SPEECH: float = 0.5  # minimum speech before allowing endpoint
+_CAPTURE_FLUSH_FRAMES: int = 3  # frames to discard after wake word (overflow buffer)
 
 
 # ---------------------------------------------------------------------------
@@ -220,6 +221,7 @@ class WakeWordListener:
         self._capture_frames: list[np.ndarray] = []
         self._capture_rms: deque[float] = deque(maxlen=self._silence_window_frames)
         self._post_capture_until: float = 0.0  # suppress detections until this monotonic time
+        self._capture_flush_frames: int = 0  # remaining overflow frames to discard
 
         # Runtime state.
         self._running: bool = False
@@ -405,13 +407,17 @@ class WakeWordListener:
 
         The current frame (the one that triggered detection) is NOT
         included in the capture buffer — the utterance starts after
-        the wake word.
+        the wake word.  The first ``_CAPTURE_FLUSH_FRAMES`` frames
+        are also discarded to clear overflow noise from the audio
+        stream buffer.
         """
         self._capturing = True
         self._capture_frames.clear()
         self._capture_rms.clear()
-        logger.debug("Entered capture mode (max %d frames, silence=%d frames)",
-                     self._max_capture_frames, self._silence_window_frames)
+        self._capture_flush_frames = _CAPTURE_FLUSH_FRAMES
+        logger.debug("Entered capture mode (max %d frames, silence=%d frames, flush=%d)",
+                     self._max_capture_frames, self._silence_window_frames,
+                     _CAPTURE_FLUSH_FRAMES)
 
     def _capture_frame(self, audio: np.ndarray) -> None:
         """Accumulate one frame and check for endpoint conditions.
@@ -421,6 +427,11 @@ class WakeWordListener:
         audio:
             1-D ``int16`` array of ``_BLOCK_SIZE`` samples.
         """
+        # Flush overflow frames before accumulating real speech.
+        if self._capture_flush_frames > 0:
+            self._capture_flush_frames -= 1
+            return
+
         self._capture_frames.append(audio.copy())
 
         # RMS energy for this frame.
