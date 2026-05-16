@@ -34,12 +34,18 @@ from urllib.error import URLError
 
 import numpy as np
 
-from minty_box.handler import DirectLLMHandler, HermesAPIHandler
+from minty_box.handler import DirectLLMHandler
 from minty_box.speaker import Speaker
 from minty_box.stt import SpeechToText
 from minty_box.tts import KokoroTTS
-from minty_box.handler import VOICE_MODEL as DEFAULT_LLM_MODEL
 from minty_box.wake import WakeWordListener
+
+# ── Voice model config ─────────────────────────────────────────────────
+# Gemma4 31B cloud via Ollama — 0.9s for simple queries (vs 21s for
+# Hermes API). Suitable for quick voice interactions: time, weather,
+# simple questions. For multi-turn coding conversations, use the
+# real Hermes agent on Discord/Telegram instead.
+_VOICE_MODEL = "gemma4:31b-cloud"
 
 logger = logging.getLogger(__name__)
 
@@ -98,10 +104,10 @@ def main() -> None:
     parser.add_argument(
         "--llm-model",
         type=str,
-        default=DEFAULT_LLM_MODEL,
+        default=_VOICE_MODEL,
         help=(
             "LLM model tag for voice responses "
-            f"(default: {DEFAULT_LLM_MODEL})"
+            f"(default: {_VOICE_MODEL})"
         ),
     )
     parser.add_argument(
@@ -162,11 +168,11 @@ def main() -> None:
 
     speaker = _get_speaker() if not args.no_tts else None
 
-    # ── handler: Hermes API (the real agent) ────────────────────────────
-    handler = HermesAPIHandler()
+    # ── handler: Gemma4 cloud via Ollama (0.9s, not 21s) ─────────────────
+    handler = DirectLLMHandler(model=_VOICE_MODEL)
     logger.info(
-        "Using Hermes API handler (agent=%s, timeout=%ds).",
-        "hermes-agent",
+        "Using Direct LLM handler (model=%s, timeout=%ds).",
+        _VOICE_MODEL,
         handler._timeout,
     )
 
@@ -234,7 +240,7 @@ def main() -> None:
                 "language_probability": result.language_probability,
                 "audio_duration_s": result.duration,
                 "filter_applied": result.filter_applied,
-                "handler": "hermes-api",
+                "handler": "gemma4-voice",
             }
             filename = (
                 wake_timestamp.strftime("%Y-%m-%dT%H-%M-%S") + ".json"
