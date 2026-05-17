@@ -34,18 +34,11 @@ from urllib.error import URLError
 
 import numpy as np
 
-from minty_box.handler import DirectLLMHandler
+from minty_box.handler import HermesAPIHandler
 from minty_box.speaker import Speaker
 from minty_box.stt import SpeechToText
 from minty_box.tts import KokoroTTS
 from minty_box.wake import WakeWordListener
-
-# ── Voice model config ─────────────────────────────────────────────────
-# Gemma4 31B cloud via Ollama — 0.9s for simple queries (vs 21s for
-# Hermes API). Suitable for quick voice interactions: time, weather,
-# simple questions. For multi-turn coding conversations, use the
-# real Hermes agent on Discord/Telegram instead.
-_VOICE_MODEL = "gemma4:31b-cloud"
 
 logger = logging.getLogger(__name__)
 
@@ -104,11 +97,8 @@ def main() -> None:
     parser.add_argument(
         "--llm-model",
         type=str,
-        default=_VOICE_MODEL,
-        help=(
-            "LLM model tag for voice responses "
-            f"(default: {_VOICE_MODEL})"
-        ),
+        default=None,
+        help="Model override for Hermes agent (optional).",
     )
     parser.add_argument(
         "--no-tts",
@@ -168,11 +158,10 @@ def main() -> None:
 
     speaker = _get_speaker() if not args.no_tts else None
 
-    # ── handler: Gemma4 cloud via Ollama (0.9s, not 21s) ─────────────────
-    handler = DirectLLMHandler(model=_VOICE_MODEL)
+    # ── handler: Hermes API server — the REAL agent ─────────────────────
+    handler = HermesAPIHandler(timeout=30)
     logger.info(
-        "Using Direct LLM handler (model=%s, timeout=%ds).",
-        _VOICE_MODEL,
+        "Using Hermes API handler (agent=hermes-agent, timeout=%ds).",
         handler._timeout,
     )
 
@@ -253,18 +242,9 @@ def main() -> None:
         if not transcription:
             return
 
-        # 3. Route to Direct LLM handler — inject time/date context
-        # since Gemma4 has no tool access to run `date`.
-        now = datetime.now()
-        time_context = (
-            f"Current time: {now.strftime('%H:%M')} on "
-            f"{now.strftime('%A, %d %B %Y')}. "
-            f"Location: Moorside Cottage, Liphook, UK (BST/GMT). "
-        )
-        augmented = f"{time_context}\nUser query: {transcription}"
-
+        # 3. Route to Hermes API — the real agent (SOUL.md, memory, skills).
         try:
-            response = handler.process(augmented)
+            response = handler.process(transcription)
         except Exception:
             logger.exception("Handler failed")
             response = "Sorry, I couldn't process that."
