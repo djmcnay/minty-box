@@ -89,7 +89,12 @@ class WarmHermesSession:
 
         # 3. Switch to the fast voice model.
         logger.info("Switching voice session to %s...", model)
-        self._send_raw(f"/model {model}", wait=6.0)
+        # Send tokens separately to avoid tmux send-keys interpretation issues.
+        subprocess.run(
+            ["tmux", "send-keys", "-t", SESSION_NAME, "/model", "Space", model, "Enter"],
+            check=True, capture_output=True, text=True,
+        )
+        time.sleep(6.0)
 
         # 4. Fire a warm-up query (fire-and-forget — first user query
         #    picks up the warm session naturally).
