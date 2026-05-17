@@ -34,8 +34,7 @@ from urllib.error import URLError
 
 import numpy as np
 
-from minty_box.handler import WarmHermesHandler
-from minty_box.session import WarmHermesSession
+from minty_box.handler import HermesAPIHandler
 from minty_box.speaker import Speaker
 from minty_box.stt import SpeechToText
 from minty_box.tts import KokoroTTS
@@ -159,14 +158,12 @@ def main() -> None:
 
     speaker = _get_speaker() if not args.no_tts else None
 
-    # ── handler: warm Hermes session — the REAL agent ──────────────────
-    # Spawns a detached tmux Hermes instance, switches to gemma4 for speed,
-    # and warms the session. Main Hermes config (cron, CLI, Discord) is
-    # untouched — this is a separate voice-only session.
-    session = WarmHermesSession()
-    session.start()
-    handler = WarmHermesHandler(session)
-    logger.info("Voice handler ready (warm Hermes session).")
+    # ── handler: Hermes API server — the REAL agent ─────────────────────
+    handler = HermesAPIHandler(timeout=30)
+    logger.info(
+        "Using Hermes API handler (agent=hermes-agent, timeout=%ds).",
+        handler._timeout,
+    )
 
     # ── resolve wake word model paths ─────────────────────────────────
     model_paths: list[str] | None = None
