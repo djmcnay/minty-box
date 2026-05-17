@@ -253,9 +253,18 @@ def main() -> None:
         if not transcription:
             return
 
-        # 3. Route to Direct LLM handler.
+        # 3. Route to Direct LLM handler — inject time/date context
+        # since Gemma4 has no tool access to run `date`.
+        now = datetime.now()
+        time_context = (
+            f"Current time: {now.strftime('%H:%M')} on "
+            f"{now.strftime('%A, %d %B %Y')}. "
+            f"Location: Moorside Cottage, Liphook, UK (BST/GMT). "
+        )
+        augmented = f"{time_context}\nUser query: {transcription}"
+
         try:
-            response = handler.process(transcription)
+            response = handler.process(augmented)
         except Exception:
             logger.exception("Handler failed")
             response = "Sorry, I couldn't process that."
