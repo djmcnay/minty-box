@@ -26,7 +26,7 @@ DEFAULT_LLM_TIMEOUT = 30  # agent may need 2-3 API calls + tool turns
 MAX_TOKENS = 80  # ~3 spoken sentences
 
 # ── Hermes API server ──────────────────────────────────────────────────
-HERMES_API = "http://127.0.0.1:8642/v1/chat/completions"
+HERMES_API = "http://127.0.0.1:8643/v1/chat/completions"
 
 
 # ═══════════════════════════════════════════════════════════════════════

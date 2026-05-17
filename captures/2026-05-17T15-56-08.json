@@ -1,0 +1,12 @@
+{
+  "timestamp": "2026-05-17T15:56:08.529165+00:00",
+  "wake_word": "hey_jarvis_v0.1",
+  "wake_score": 0.9969324469566345,
+  "transcription": "It doesn't make that for you. Wow, you lucky girl! I like the color.",
+  "raw_transcription": "It doesn't make that for you. Wow, you lucky girl! I like the color.",
+  "language": "en",
+  "language_probability": 1,
+  "audio_duration_s": 10.0,
+  "filter_applied": null,
+  "handler": "gemma4-voice"
+}

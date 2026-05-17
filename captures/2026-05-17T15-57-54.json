@@ -1,0 +1,12 @@
+{
+  "timestamp": "2026-05-17T15:57:54.073865+00:00",
+  "wake_word": "hey_jarvis_v0.1",
+  "wake_score": 0.9970258474349976,
+  "transcription": "It's amazing! Absolutely amazing!",
+  "raw_transcription": "It's amazing! Absolutely amazing!",
+  "language": "en",
+  "language_probability": 1,
+  "audio_duration_s": 4.24,
+  "filter_applied": null,
+  "handler": "gemma4-voice"
+}

@@ -1,0 +1,12 @@
+{
+  "timestamp": "2026-05-17T15:54:59.928970+00:00",
+  "wake_word": "hey_jarvis_v0.1",
+  "wake_score": 0.9966500997543335,
+  "transcription": "I promise.",
+  "raw_transcription": "I promise.",
+  "language": "en",
+  "language_probability": 1,
+  "audio_duration_s": 1.04,
+  "filter_applied": null,
+  "handler": "gemma4-voice"
+}

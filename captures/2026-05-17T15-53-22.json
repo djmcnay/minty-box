@@ -1,0 +1,12 @@
+{
+  "timestamp": "2026-05-17T15:53:22.027676+00:00",
+  "wake_word": "hey_jarvis_v0.1",
+  "wake_score": 0.8893232345581055,
+  "transcription": "What time is it?",
+  "raw_transcription": "What time is it?",
+  "language": "en",
+  "language_probability": 1,
+  "audio_duration_s": 2.32,
+  "filter_applied": null,
+  "handler": "gemma4-voice"
+}
