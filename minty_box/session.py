@@ -27,47 +27,76 @@ class WarmHermesSession:
     voice utterance.  The session survives across queries — tools,
     model connection, and skills stay loaded.
 
+    On ``start``, switches to a configured fast model (e.g. gemma4)
+    so voice responses are quick, then warms the session with a
+    trivial query.  The main Hermes config (cron, CLI, Discord) is
+    not affected — this is a separate, voice-only instance.
+
     If the session dies or becomes unresponsive, :meth:`query` falls
     back to spawning a fresh ``hermes chat -q`` subprocess (with a
     generous 90s timeout).
     """
+
+    # Model to switch to inside the voice session.
+    _VOICE_MODEL = "ollama-local/gemma4:31b-cloud"
 
     def __init__(self) -> None:
         self._fallback_timeout = 90
 
     # ── public API ───────────────────────────────────────────────────
 
-    def start(self) -> bool:
+    def start(self, voice_model: str | None = None) -> bool:
         """Ensure the warm session is running, starting it if necessary.
+
+        Creates a detached tmux session, boots Hermes, switches to the
+        voice model, and warms the session with a trivial query.
+
+        Args:
+            voice_model: Model to switch to (default: ``_VOICE_MODEL``).
 
         Returns:
             ``True`` if a new session was created, ``False`` if one
             already existed.
         """
         if self._session_exists():
-            logger.info("Warm Hermes session '%s' already running.", SESSION_NAME)
+            logger.info(
+                "Warm Hermes session '%s' already running.", SESSION_NAME
+            )
             return False
 
-        logger.info("Starting warm Hermes session '%s'...", SESSION_NAME)
+        model = voice_model or self._VOICE_MODEL
+
+        logger.info(
+            "Starting warm Hermes session '%s' (voice-model=%s)...",
+            SESSION_NAME, model,
+        )
+
+        # 1. Create detached tmux session.
         subprocess.run(
             [
                 "tmux", "new-session", "-d", "-s", SESSION_NAME,
                 "-x", "200", "-y", "40",
             ],
-            check=True,
-            capture_output=True,
-            text=True,
+            check=True, capture_output=True, text=True,
         )
-        # Start hermes inside the session.
+
+        # 2. Boot Hermes inside it.
         subprocess.run(
             ["tmux", "send-keys", "-t", SESSION_NAME, "hermes", "Enter"],
-            check=True,
-            capture_output=True,
-            text=True,
+            check=True, capture_output=True, text=True,
         )
-        # Give hermes time to boot (config, skills, model connect).
-        time.sleep(6)
-        logger.info("Warm Hermes session ready.")
+        time.sleep(6)  # Hermes boot: config, skills, model connect
+
+        # 3. Switch to the fast voice model.
+        logger.info("Switching voice session to %s...", model)
+        self._send_raw(f"/model {model}", wait=6.0)
+
+        # 4. Fire a warm-up query (fire-and-forget — first user query
+        #    picks up the warm session naturally).
+        logger.info("Priming voice session...")
+        self._send_raw("Hello", wait=10.0)
+        logger.info("Voice session ready.")
+
         return True
 
     def query(self, text: str) -> str:
@@ -118,6 +147,30 @@ class WarmHermesSession:
             capture_output=True,
         )
         return result.returncode == 0
+
+    def _send_raw(self, text: str, wait: float = 2.0) -> None:
+        """Send a command to the tmux session without waiting for prompt.
+
+        Used for model switches and other commands that may not produce
+        output detectable by ``_warm_query``'s prompt logic.
+
+        Args:
+            text: The command to send (Enter is appended automatically).
+            wait: Seconds to sleep after sending.
+        """
+        subprocess.run(
+            ["tmux", "send-keys", "-t", SESSION_NAME, text, "Enter"],
+            check=True, capture_output=True, text=True,
+        )
+        time.sleep(wait)
+
+    def _send_command(self, text: str) -> None:
+        """Send a command and wait for prompt confirmation.
+
+        Used for warm-up — not for user utterances (use :meth:`query`
+        for those).
+        """
+        self._warm_query(text)
 
     def _warm_query(self, text: str) -> str:
         """Send text to interactive hermes, wait for prompt, extract response."""

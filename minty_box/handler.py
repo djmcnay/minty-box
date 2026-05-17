@@ -56,25 +56,61 @@ class HermesAPIHandler(BaseHandler):
     No system prompt needed: Hermes already carries SOUL.md, memory,
     skills, and full tool access.
 
-    Target latency: 3–8 seconds for typical voice queries (agent loop
-    with 0–2 tool calls).
+    If ``model`` is provided, the API call specifies that model;
+    on failure (model not found), falls back to the Hermes default
+    (``"hermes-agent"`` — no model override in the payload).
+
+    Target latency: <2s with fast models (gemma4), 3–8s with heavy
+    models (deepseek), including 0–2 tool turns.
     """
+
+    # Sentinel returned on first failure to trigger fallback retry.
+    _FALLBACK_SENTINEL = object()
 
     def __init__(
         self,
+        model: str | None = None,
         timeout: int = DEFAULT_LLM_TIMEOUT,
         max_tokens: int = MAX_TOKENS,
+        warm: bool = True,
     ) -> None:
+        self._voice_model = model  # None = use Hermes default
         self._timeout = timeout
         self._max_tokens = max_tokens
+        # Prime the agent session so the first real query is fast.
+        if warm:
+            self._warm_up()
 
-    def process(self, text: str) -> str:
-        if not text.strip():
-            return "I didn't catch that."
+    def _warm_up(self) -> None:
+        """Send a trivial query to prime the agent session.
+
+        Uses the configured voice model if one is set; otherwise the
+        Hermes default.  Blocking — the caller accepts the startup delay.
+        """
+        logger.info("Warming Hermes agent session (this may take 10-30s)...")
+        try:
+            self._call_api("Hello", model_override=self._voice_model)
+            logger.info("Hermes agent session warm.")
+        except Exception:
+            logger.warning("Agent warm-up failed; first query will be slow")
+
+    def _call_api(self, text: str, model_override: str | None = None
+                  ) -> str | object:
+        """POST to the Hermes API server.  Returns response text or
+        ``_FALLBACK_SENTINEL`` on model-not-found.
+
+        Parameters
+        ----------
+        text:
+            User message content.
+        model_override:
+            If set, used as the ``model`` field; otherwise ``"hermes-agent"``.
+        """
+        model_name = model_override if model_override is not None else "hermes-agent"
 
         payload = json.dumps(
             {
-                "model": "hermes-agent",
+                "model": model_name,
                 "messages": [
                     {"role": "user", "content": text.strip()},
                 ],
@@ -93,7 +129,7 @@ class HermesAPIHandler(BaseHandler):
                 body = resp.read().decode("utf-8")
         except Exception as e:
             logger.error("Hermes API call failed: %s", e)
-            return "Sorry, my brain isn't connected right now. Try again?"
+            return self._FALLBACK_SENTINEL  # triggers fallback
 
         try:
             data = json.loads(body)
@@ -101,14 +137,38 @@ class HermesAPIHandler(BaseHandler):
         except (json.JSONDecodeError, KeyError, IndexError) as e:
             logger.error("Failed to parse Hermes API response: %s", e)
             logger.debug("Raw response: %s", body[:500])
-            return "Sorry, I got a garbled response. Try again?"
+            return self._FALLBACK_SENTINEL
 
-        response = _clean_for_speech(content)
+        return content
 
+    def process(self, text: str) -> str:
+        if not text.strip():
+            return "I didn't catch that."
+
+        # Try voice model first, fall back to Hermes default.
+        if self._voice_model:
+            result = self._call_api(text, model_override=self._voice_model)
+            if result is not self._FALLBACK_SENTINEL:
+                response = _clean_for_speech(result)
+                logger.info(
+                    "Voice model response (%d chars, model=%s) for %r",
+                    len(response), self._voice_model, text[:60],
+                )
+                return response
+            # Fallback: retry with Hermes default.
+            logger.warning(
+                "Voice model %r unavailable; falling back to Hermes default",
+                self._voice_model,
+            )
+
+        result = self._call_api(text)
+        if result is self._FALLBACK_SENTINEL:
+            return "Sorry, my brain isn't connected right now. Try again?"
+
+        response = _clean_for_speech(result)
         logger.info(
             "Hermes API response (%d chars) for %r",
-            len(response),
-            text[:60],
+            len(response), text[:60],
         )
         return response
 
