@@ -38,7 +38,7 @@ class WarmHermesSession:
     """
 
     # Model to switch to inside the voice session.
-    _VOICE_MODEL = "ollama-local/gemma4:31b-cloud"
+    _VOICE_MODEL = "gemma4:31b-cloud"
 
     def __init__(self) -> None:
         self._fallback_timeout = 90
