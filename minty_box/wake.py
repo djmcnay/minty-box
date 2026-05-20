@@ -281,11 +281,12 @@ class WakeWordListener:
     def stop(self) -> None:
         """Request graceful shutdown.
 
-        Thread-safe.  May be called from any thread, including a
-        callback invoked by :meth:`start`.  The listener will exit
-        at the next iteration of the main loop.
+        Resets signal handlers to defaults so repeated Ctrl+C kills
+        immediately.  Thread-safe; may be called from any thread.
         """
         self._running = False
+        signal.signal(signal.SIGINT, signal.default_int_handler)
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
 
     # ------------------------------------------------------------------
     # Audio callback (executed by sounddevice on its background thread)

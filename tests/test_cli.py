@@ -118,15 +118,12 @@ class TestStartListener:
             _start_listener(
                 model="models/Araminta.onnx",
                 threshold=0.3,
-                warm=True,
                 captures=False,
             )
         mock_popen.assert_called_once()
-        # Module-based invocation: python -m minty_box.main
+        # Direct invocation: python main.py (repo root is cwd)
         args = mock_popen.call_args[0][0]
-        assert "-m" in args
-        assert "minty_box.main" in args
-        assert "--warm" in args
+        assert "main.py" in args
         assert "--model" in args
 
 
@@ -154,17 +151,12 @@ class TestCLIMain:
             main()
 
     @mock.patch("builtins.print")
-    @mock.patch("minty_box.session.WarmHermesSession")
-    def test_start_runs_full_sequence(self, mock_session_cls, _mock_print):
-        mock_session = mock.MagicMock()
-        mock_session.start.return_value = True
-        mock_session_cls.return_value = mock_session
-
+    def test_start_runs_full_sequence(self, _mock_print):
+        """Start command checks hardware, kokoro, then launches listener."""
         with mock.patch("sys.argv", [
             "minty-box", "start",
             "--model", "models/Araminta.onnx",
             "--threshold", "0.3",
-            "--warm",
         ]), \
              mock.patch(
                  "minty_box.cli._find_and_kill_stale", return_value=0
@@ -175,21 +167,16 @@ class TestCLIMain:
              mock.patch(
                  "minty_box.cli._check_kokoro", return_value=True
              ), \
-             mock.patch("minty_box.cli._start_listener"), \
+             mock.patch("minty_box.cli._start_listener") as mock_start, \
              mock.patch("time.sleep"):
             main()
-        mock_session.start.assert_called_once()
+        mock_start.assert_called_once()
 
     @mock.patch("builtins.print")
     def test_stop_kills_and_verifies(self, _mock_print):
+        """Stop command kills stale processes and reports result."""
         with mock.patch("sys.argv", ["minty-box", "stop"]), \
              mock.patch(
                  "minty_box.cli._find_and_kill_stale", return_value=2
-             ), \
-             mock.patch(
-                 "minty_box.session.WarmHermesSession"
-             ) as mock_session_cls:
-            mock_session = mock.MagicMock()
-            mock_session_cls.return_value = mock_session
+             ):
             main()
-        mock_session.stop.assert_called_once()

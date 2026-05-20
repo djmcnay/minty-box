@@ -47,17 +47,6 @@ def main() -> None:
         help="Wake word detection threshold (default: 0.3)",
     )
     p_start.add_argument(
-        "--warm",
-        action="store_true",
-        default=True,
-        help="Use warm Hermes via tmux (default: on)",
-    )
-    p_start.add_argument(
-        "--no-warm",
-        action="store_true",
-        help="Disable warm Hermes, use cold single-shot",
-    )
-    p_start.add_argument(
         "--no-captures",
         action="store_true",
         help="Don't save capture JSONs",
@@ -109,24 +98,11 @@ def cmd_start(args: argparse.Namespace) -> None:
         print("   🔊 Kokoro TTS ready.")
         tts_ok = True
 
-    # 4. Warm Hermes session (if enabled).
-    warm = args.warm and not args.no_warm
-    if warm and tts_ok:
-        from minty_box.session import WarmHermesSession
-        session = WarmHermesSession()
-        session.start()
-        print("   🧠 Warm Hermes session ready.")
-    else:
-        if not warm:
-            print("   🧠 Cold single-shot mode (no warm Hermes).")
-        print()
-
-    # 5. Launch listener.
+    # 4. Launch listener.
     print()
     _start_listener(
         model=args.model,
         threshold=args.threshold,
-        warm=warm,
         captures=not args.no_captures,
         no_tts=not tts_ok,
     )
@@ -141,9 +117,6 @@ def cmd_stop() -> None:
         print(f"🧹 Stopped {killed} process(es).")
     else:
         print("Nothing running.")
-    # Also kill warm Hermes tmux session.
-    from minty_box.session import WarmHermesSession
-    WarmHermesSession().stop()
     print("✅ Minty Box stopped.")
 
 
@@ -271,7 +244,6 @@ def _check_kokoro() -> bool:
 def _start_listener(
     model: str,
     threshold: float,
-    warm: bool,
     captures: bool,
     no_tts: bool = False,
 ) -> None:
@@ -283,12 +255,10 @@ def _start_listener(
     """
     cmd = [
         sys.executable,
-        "-m", "minty_box.main",  # run as module (avoids path issues)
+        "main.py",              # run from repo root (cwd is set below)
         "--model", model,
         "--threshold", str(threshold),
     ]
-    if warm:
-        cmd.append("--warm")
     if not captures:
         cmd.append("--no-captures")
     if no_tts:

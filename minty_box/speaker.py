@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_VOLUME = 0.08  # daytime normal per calibration table
 BEEP_FREQ = 330  # Hz — low, dulcet
 BEEP_DURATION = 0.15  # seconds
-BEEP_VOLUME = 0.03  # subtle acknowledgment
+BEEP_VOLUME = 0.05  # subtle acknowledgment
 SAMPLE_RATE = 16000
 PLAYBACK_TIMEOUT = 30
 

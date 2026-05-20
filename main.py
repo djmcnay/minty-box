@@ -1,15 +1,15 @@
-"""Minty Box — integration harness.
+"""Minty Box — voice-assistant pipeline.
 
-Wires wake word detection, speech-to-text, Direct LLM query, text-to-speech,
-and audio playback together as a complete voice-assistant pipeline.
+Wires wake-word detection, speech-to-text, Hermes agent query, text-to-speech,
+and audio playback into a single ALSA-stream pipeline.
 
-Architecture:
+Architecture (two-gateway):
     Single ALSA stream → wake word detection (openWakeWord)
-        → on_wake fires → beep → capture mode (same stream, silence detection)
+        → on_wake fires → beep → capture mode (silence detection)
         → on_utterance delivers buffer → stt.transcribe_buffer()
-        → handler.process(text) → Direct LLM API (fast cloud model)
+        → handler.process(text) → Hermes agent API @ :8643 (gemma4-voice)
         → _clean_for_speech(response)
-        → tts.synthesize(text) → Kokoro HTTP API (local)
+        → tts.synthesize(text) → Kokoro HTTP API (local) → bf_emma
         → speaker.play(wav) → ReSpeaker Lite speaker
 
 Target end-to-end latency: ~10 seconds.
@@ -18,7 +18,6 @@ Usage:
     uv run python main.py                                    # defaults
     uv run python main.py --model models/Araminta.onnx       # custom wake word
     uv run python main.py --threshold 0.55                   # detection threshold
-    uv run python main.py --llm-model gemini-3-flash-preview:latest
     uv run python main.py --no-tts                           # text-only
     uv run python main.py --debug                            # verbose logging
 """
@@ -148,7 +147,7 @@ def main() -> None:
     if not args.no_tts:
         try:
             tts = _get_tts()
-            tts.synthesize(".")  # one-character warm-up
+            tts.synthesize("Hello")  # warm-up (brief, meaningful text)
             logger.info("Kokoro TTS ready.")
         except (URLError, OSError, ValueError) as e:
             logger.warning(
@@ -176,7 +175,7 @@ def main() -> None:
             model_paths.append(str(path))
     else:
         model_paths = [
-            str(Path(__file__).parent / "models" / "hey_jarvis_v0.1.onnx")
+            str(Path(__file__).parent / "models" / "Araminta.onnx")
         ]
 
     # ── callbacks ──────────────────────────────────────────────────────
@@ -229,7 +228,8 @@ def main() -> None:
                 "language_probability": result.language_probability,
                 "audio_duration_s": result.duration,
                 "filter_applied": result.filter_applied,
-                "handler": "gemma4-voice",
+                "handler": "HermesAPIHandler",
+                "gateway": "http://100.65.212.67:8643/v1/chat/completions",
             }
             filename = (
                 wake_timestamp.strftime("%Y-%m-%dT%H-%M-%S") + ".json"

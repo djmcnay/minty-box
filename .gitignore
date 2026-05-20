@@ -8,3 +8,11 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Captures (runtime JSON logs)
+captures/*.json
+
+# Model files (too large for git)
+*.tflite
+*.onnx
+models/
